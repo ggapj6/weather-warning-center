@@ -1,6 +1,13 @@
 const SUPABASE_URL = "https://whmtnbyqathjvbxqoajd.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cMFioKF3OCWUysE03hYNkg_1lNY_rG9";
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+const SUPABASE_PUBLISHABLE_KEY = "YOUR_EXISTING_KEY";
+
+const supabaseClient = window.supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY
+);
+
+const VAPID_PUBLIC_KEY =
+  "BLC3yUrOm1EsuIDpDUSNv3eQF_7tQjbwUhufN6Ds5QpTl6FUEJ5jV6_ggEvx8YltnKALVr5zlERPFKBfX5LzJRc";
 
 // ===============================
 // PUSH NOTIFICATIONS
@@ -29,9 +36,6 @@ async function enablePushNotifications() {
 
     console.log("Service worker registered.");
 
-    // IMPORTANT:
-    // We will put your VAPID public key here later.
-    const vapidPublicKey = "sb_publishable_cMFioKF3OCWUysE03hYNkg_1lNY_rG9";
 
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
