@@ -2,6 +2,86 @@ const SUPABASE_URL = "https://whmtnbyqathjvbxqoajd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cMFioKF3OCWUysE03hYNkg_1lNY_rG9";
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
+const SUPABASE_URL = "https://whmtnbyqathjvbxqoajd.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cMFioKF3OCWUysE03hYNkg_1lNY_rG9";
+
+const supabaseClient = window.supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY
+);
+
+// ===============================
+// PUSH NOTIFICATIONS
+// ===============================
+
+async function enablePushNotifications() {
+  if (!("serviceWorker" in navigator)) {
+    console.log("Service workers are not supported.");
+    return;
+  }
+
+  if (!("PushManager" in window)) {
+    console.log("Push notifications are not supported.");
+    return;
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+
+    if (permission !== "granted") {
+      console.log("Notification permission denied.");
+      return;
+    }
+
+    const registration = await navigator.serviceWorker.register("/sw.js");
+
+    console.log("Service worker registered.");
+
+    // IMPORTANT:
+    // We will put your VAPID public key here later.
+    const vapidPublicKey = "sb_publishable_cMFioKF3OCWUysE03hYNkg_1lNY_rG9";
+
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+    });
+
+    const subscriptionJSON = subscription.toJSON();
+
+    const { error } = await supabaseClient
+      .from("push_subscriptions")
+      .upsert({
+        endpoint: subscriptionJSON.endpoint,
+        subscription: subscriptionJSON
+      }, {
+        onConflict: "endpoint"
+      });
+
+    if (error) {
+      console.error("Could not save push subscription:", error);
+      return;
+    }
+
+    console.log("✅ Push notifications enabled!");
+  } catch (error) {
+    console.error("Push notification error:", error);
+  }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - base64String.length % 4) % 4);
+
+  const base64 = (base64String + padding)
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+
+  const rawData = window.atob(base64);
+
+  return Uint8Array.from(
+    [...rawData].map(char => char.charCodeAt(0))
+  );
+}
+
 function formatDate(v){
   if(!v) return "—";
   const d=new Date(v);
