@@ -1,27 +1,4 @@
 const CACHE_NAME = "weather-warning-center-v1";
 const APP_SHELL = ["./","./index.html","./admin.html","./app.js","./style.css","./manifest.json"];
 
-self.addEventListener("install", event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)));
-  self.skipWaiting();
-});
-
-self.addEventListener("activate", event => {
-  event.waitUntil(caches.keys().then(keys =>
-    Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-  ));
-  self.clients.claim();
-});
-
-self.addEventListener("fetch", event => {
-  if (event.request.method !== "GET") return;
-  const url = new URL(event.request.url);
-  if (url.hostname.includes("supabase.co")) return;
-  event.respondWith(
-    fetch(event.request).then(response => {
-      const copy = response.clone();
-      caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
-      return response;
-    }).catch(() => caches.match(event.request).then(r => r || caches.match("./index.html")))
-  );
-});
+self.addEventListener("push", event => { let data = {}; try { data = event.data ? event.data.json() : {}; } catch { data = { title: "Weather Warning Center", body: event.data ? event.data.text() : "Jauns laikapstākļu brīdinājums." }; } const title = data.title || "Weather Warning Center"; const options = { body: data.body || "Jauns laikapstākļu brīdinājums.", icon: data.icon || "/weather-warning-center/icons/icon-192.png", badge: data.badge || "/weather-warning-center/icons/icon-192.png", tag: data.tag || "weather-warning", renotify: true, requireInteraction: data.requireInteraction ?? true, data: { url: data.url || "/weather-warning-center/" } }; event.waitUntil( self.registration.showNotification(title, options) ); }); self.addEventListener("notificationclick", event => { event.notification.close(); const url = event.notification.data?.url || "/weather-warning-center/"; event.waitUntil( clients.matchAll({ type: "window", includeUncontrolled: true }).then(windowClients => { for (const client of windowClients) { if ("focus" in client) { client.navigate(url); return client.focus(); } } if (clients.openWindow) { return clients.openWindow(url); } }) ); }); self.addEventListener("install", event => { self.skipWaiting(); }); self.addEventListener("activate", event => { event.waitUntil(self.clients.claim()); });
