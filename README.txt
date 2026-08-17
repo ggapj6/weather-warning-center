@@ -1,22 +1,21 @@
-WEATHER WARNING WEBSITE - FIXED V2
+PUT THESE FILES IN YOUR GITHUB PAGES SITE
 
-IMPORTANT:
-The previous version did not save the warning from admin.html into browser storage.
-This version DOES.
+1. Upload manifest.json next to index.html.
+2. Upload sw.js next to index.html.
+3. Upload the icons folder with icon-192.png and icon-512.png.
 
-LOCAL TEST:
-1. Open admin.html in Edge.
-2. Add a warning.
-3. Click "Add warning".
-4. Open index.html (or refresh it).
-5. The warning appears immediately.
+ADD TO index.html INSIDE <head>:
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1468e8">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 
-FILE:
-Click "Download warnings.json" to create the file you can upload to your web server.
+ADD BEFORE </body>:
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(console.error);
+  });
+}
+</script>
 
-ONLINE:
-Put index.html, admin.html, app.js, style.css and warnings.json in the same server folder.
-The public page reads warnings.json automatically.
-
-NOTE:
-The browser's local storage is used for immediate local testing. It is separate from the physical warnings.json file.
+The service worker does not cache Supabase requests, so live warnings can continue updating.

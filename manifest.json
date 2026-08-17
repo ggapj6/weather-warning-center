@@ -1,0 +1,25 @@
+{
+  "name": "Weather Warning Center",
+  "short_name": "Weather Warnings",
+  "description": "Latvijas laikapstākļu brīdinājumu centrs",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f8fc",
+  "theme_color": "#1468e8",
+  "lang": "lv",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
