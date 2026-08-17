@@ -2,13 +2,6 @@ const SUPABASE_URL = "https://whmtnbyqathjvbxqoajd.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cMFioKF3OCWUysE03hYNkg_1lNY_rG9";
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
-const SUPABASE_URL = "https://whmtnbyqathjvbxqoajd.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cMFioKF3OCWUysE03hYNkg_1lNY_rG9";
-const supabaseClient = window.supabase.createClient(
-  SUPABASE_URL,
-  SUPABASE_PUBLISHABLE_KEY
-);
-
 // ===============================
 // PUSH NOTIFICATIONS
 // ===============================
