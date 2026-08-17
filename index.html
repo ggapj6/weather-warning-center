@@ -1,1 +1,1117 @@
-<!doctype html> <html lang="lv"> <head> <meta charset="utf-8"> <meta name="viewport" content="width=device-width, initial-scale=1" > <meta name="theme-color" content="#1468e8" > <link rel="manifest" href="manifest.json" > <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" > <link rel="apple-touch-icon" href="icons/icon-192.png" > <title> Weather Warning Center </title> <link rel="stylesheet" href="style.css" > <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script> <style> .push-panel { margin-top: 24px; } .push-box { padding: 20px; border: 1px solid #dbe3ef; border-radius: 16px; background: #f8fbff; } .push-box p { margin-top: 0; } .push-status { margin-top: 12px; font-size: 14px; } .push-status.ok { color: #16803c; } .push-status.err { color: #c62828; } .warning-actions { margin-top: 16px; } .empty { padding: 24px; text-align: center; } .loading { padding: 24px; text-align: center; } </style> </head> <body> <header class="topbar"> <div class="brand"> <span class="brand-dot"></span> <div> <strong> Weather Warning Center </strong> <small> Latvijas laikapstākļu brīdinājumi </small> </div> </div> <nav> <a class="active" href="index.html" > Brīdinājumu centrs </a> <a href="admin.html"> Pārvaldība </a> </nav> </header> <main class="container"> <!-- HERO --> <section class="hero"> <div> <p class="eyebrow"> WEATHER WARNING CENTER </p> <h1> Laikapstākļu brīdinājumu centrs </h1> <p class="muted"> Šeit tiek parādīti aktuālie laikapstākļu brīdinājumi Latvijā. </p> </div> </section> <!-- PUSH NOTIFICATIONS --> <section class="panel push-panel"> <h2> Push paziņojumi </h2> <p class="muted"> Ieslēdziet push paziņojumus šajā ierīcē, lai saņemtu laikapstākļu brīdinājumus. </p> <div class="push-box"> <button class="button" id="enableNotifications" type="button" > 🔔 Ieslēgt paziņojumus </button> <p id="pushStatus" class="push-status" ></p> </div> </section> <!-- WARNINGS --> <section class="panel"> <h2> Aktuālie brīdinājumi </h2> <div id="warnings"> <p class="loading"> Ielādē brīdinājumus... </p> </div> </section> </main> <footer> Weather Warning Center </footer> <script> /* * ========================================== * SUPABASE * ========================================== */ const SUPABASE_URL = "https://whmtnbyqathjvbxqoajd.supabase.co"; const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cMFioKF3OCWUysE03hYNkg_1lNY_rG9"; const VAPID_PUBLIC_KEY = "BLC3yUrOm1EsuIDpDUSNv3eQF_7tQjbwUhufN6Ds5QpTl6FUEJ5jV6_ggEvx8YltnKALVr5zlERPFKBfX5LzJRc"; const supabaseClient = window.supabase.createClient( SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY ); /* * ========================================== * HELPERS * ========================================== */ const $ = (id) => document.getElementById(id); function escapeHtml(value) { return String(value ?? "").replace( /[&<>"']/g, (character) => { const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }; return entities[character]; } ); } function formatDate(value) { if (!value) { return "—"; } const date = new Date(value); if (Number.isNaN(date.getTime())) { return value; } return date.toLocaleString( "lv-LV", { dateStyle: "medium", timeStyle: "short" } ); } function levelName(level) { if (level === "yellow") { return "Dzeltens"; } if (level === "orange") { return "Oranžs"; } if (level === "red") { return "Sarkans"; } return level; } /* * ========================================== * LOAD WARNINGS * ========================================== */ async function loadWarnings() { const container = $("warnings"); const { data, error } = await supabaseClient .from("warnings") .select( "id, level, type, area, start, end, message, created_at" ) .order( "start", { ascending: true } ); if (error) { console.error( "Supabase error:", error ); container.innerHTML = ` <p class="muted"> Neizdevās ielādēt brīdinājumus. </p> `; return; } if (!data || data.length === 0) { container.innerHTML = ` <div class="empty"> <p> Pašlaik nav aktīvu brīdinājumu. </p> <p class="muted"> Kad administrators publicēs brīdinājumu, tas parādīsies šeit. </p> </div> `; return; } container.innerHTML = data.map( (warning) => { return ` <article class="warning ${escapeHtml( warning.level )}" > <div class="warning-head"> <div class="warning-title"> <span class="badge"> ${escapeHtml( levelName( warning.level ) )} </span> <h2> ${escapeHtml( warning.type )} </h2> </div> </div> <p> ${escapeHtml( warning.message )} </p> <div class="meta"> <span> 📍 <b> ${escapeHtml( warning.area )} </b> </span> <span> 🕐 <b> ${formatDate( warning.start )} → ${formatDate( warning.end )} </b> </span> </div> </article> `; } ).join(""); } /* * ========================================== * SERVICE WORKER * ========================================== */ async function registerServiceWorker() { if (!("serviceWorker" in navigator)) { console.error( "Šis pārlūks neatbalsta Service Worker." ); return null; } try { const registration = await navigator.serviceWorker.register( "./sw.js", { scope: "./" } ); console.log( "Service Worker reģistrēts:", registration.scope ); /* * Gaidām, kamēr Service Worker * kļūst aktīvs. */ if (!registration.active) { await new Promise( (resolve) => { const worker = registration.installing || registration.waiting; if (!worker) { resolve(); return; } worker.addEventListener( "statechange", () => { if ( worker.state === "activated" ) { resolve(); } } ); } ); } return registration; } catch (error) { console.error( "Service Worker reģistrācija neizdevās:", error ); $("pushStatus").textContent = "Service Worker neizdevās palaist."; $("pushStatus").className = "push-status err"; return null; } } /* * ========================================== * PUSH NOTIFICATIONS * ========================================== */ function urlBase64ToUint8Array( base64String ) { const padding = "=".repeat( (4 - base64String.length % 4) % 4 ); const base64 = ( base64String + padding ) .replace(/-/g, "+") .replace(/_/g, "/"); const rawData = window.atob(base64); return Uint8Array.from( [...rawData].map( (character) => character.charCodeAt(0) ) ); } async function enablePushNotifications() { const status = $("pushStatus"); /* * Browser support */ if ( !("Notification" in window) ) { status.textContent = "Šis pārlūks neatbalsta paziņojumus."; status.className = "push-status err"; return; } /* * Service Worker */ const registration = await registerServiceWorker(); if (!registration) { status.textContent = "Paziņojumu ieslēgšana neizdevās: nav aktīva Service Worker."; status.className = "push-status err"; return; } /* * Request notification permission */ const permission = await Notification.requestPermission(); if (permission !== "granted") { status.textContent = "Paziņojumu atļauja netika piešķirta."; status.className = "push-status err"; return; } try { /* * Existing subscription */ let subscription = await registration.pushManager.getSubscription(); /* * Create subscription */ if (!subscription) { subscription = await registration.pushManager.subscribe( { userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array( VAPID_PUBLIC_KEY ) } ); } console.log( "Push subscription:", subscription ); /* * Save subscription to Supabase. * * This requires a table called: * * push_subscriptions */ const subscriptionJson = subscription.toJSON(); const endpoint = subscriptionJson.endpoint; const p256dh = subscriptionJson.keys?.p256dh; const auth = subscriptionJson.keys?.auth; const { error } = await supabaseClient .from("push_subscriptions") .upsert( { endpoint: endpoint, p256dh: p256dh, auth: auth }, { onConflict: "endpoint" } ); if (error) { console.error( "Subscription database error:", error ); /* * The subscription itself worked, * even if the database table doesn't * exist yet. */ status.textContent = "Paziņojumi ieslēgti šajā ierīcē."; status.className = "push-status ok"; return; } status.textContent = "🔔 Paziņojumi veiksmīgi ieslēgti!"; status.className = "push-status ok"; $("enableNotifications").textContent = "🔔 Paziņojumi ir ieslēgti"; $("enableNotifications").disabled = true; } catch (error) { console.error( "Push subscription error:", error ); status.textContent = "Paziņojumu ieslēgšana neizdevās: " + error.message; status.className = "push-status err"; } } /* * ========================================== * BUTTON * ========================================== */ $("enableNotifications").addEventListener( "click", enablePushNotifications ); /* * ========================================== * STARTUP * ========================================== */ async function startApp() { /* * Register Service Worker immediately. */ await registerServiceWorker(); /* * Load warnings. */ await loadWarnings(); /* * Automatically update warnings * every 30 seconds. */ setInterval( loadWarnings, 30000 ); } startApp(); </script> </body> </html>
+<!doctype html>
+<html lang="lv">
+
+<head>
+    <meta charset="utf-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <meta
+        name="theme-color"
+        content="#1468e8"
+    >
+
+    <link
+        rel="manifest"
+        href="manifest.json"
+    >
+
+    <link
+        rel="icon"
+        type="image/png"
+        sizes="192x192"
+        href="icons/icon-192.png"
+    >
+
+    <link
+        rel="apple-touch-icon"
+        href="icons/icon-192.png"
+    >
+
+    <title>
+        Weather Warning Center
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="style.css"
+    >
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        .push-box {
+            margin-bottom: 24px;
+        }
+
+        .push-content {
+            padding: 18px;
+            background: #f8fbff;
+            border: 1px solid #d7e3f5;
+            border-radius: 14px;
+        }
+
+        .push-button {
+            background: #1468e8;
+            color: white;
+            border: 0;
+            border-radius: 8px;
+            padding: 11px 16px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .push-button:hover {
+            background: #0f57c7;
+        }
+
+        .push-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        #pushStatus {
+            margin-top: 10px;
+        }
+
+        .push-success {
+            color: #16803c;
+        }
+
+        .push-error {
+            color: #c62828;
+        }
+
+        .push-info {
+            color: #42617d;
+        }
+
+        .empty {
+            text-align: center;
+            padding: 30px;
+            color: #687a90;
+        }
+
+        .warning {
+            margin-bottom: 14px;
+        }
+    </style>
+</head>
+
+<body>
+
+<header class="topbar">
+
+    <div class="brand">
+
+        <span class="brand-dot"></span>
+
+        <div>
+            <strong>
+                Weather Warning Center
+            </strong>
+
+            <small>
+                Latvijas laikapstākļu brīdinājumi
+            </small>
+        </div>
+
+    </div>
+
+    <nav>
+
+        <a
+            class="active"
+            href="index.html"
+        >
+            Brīdinājumu centrs
+        </a>
+
+        <a href="admin.html">
+            Pārvaldība
+        </a>
+
+    </nav>
+
+</header>
+
+
+<main class="container">
+
+    <section class="hero">
+
+        <p class="eyebrow">
+            WEATHER WARNING CENTER
+        </p>
+
+        <h1>
+            Laikapstākļu brīdinājumu centrs
+        </h1>
+
+        <p class="muted">
+            Šeit tiek parādīti aktuālie laikapstākļu brīdinājumi Latvijā.
+        </p>
+
+    </section>
+
+
+    <!-- PUSH NOTIFICATIONS -->
+
+    <section class="panel push-box">
+
+        <h2>
+            Push paziņojumi
+        </h2>
+
+        <p class="muted">
+            Ieslēdziet push paziņojumus šajā ierīcē,
+            lai saņemtu laikapstākļu brīdinājumus.
+        </p>
+
+        <div class="push-content">
+
+            <button
+                id="enablePush"
+                class="push-button"
+                type="button"
+            >
+                🔔 Ieslēgt paziņojumus
+            </button>
+
+            <p id="pushStatus"></p>
+
+        </div>
+
+    </section>
+
+
+    <!-- WARNINGS -->
+
+    <section class="panel">
+
+        <h2>
+            Aktuālie brīdinājumi
+        </h2>
+
+        <div id="warnings">
+
+            <p class="empty">
+                Ielādē brīdinājumus...
+            </p>
+
+        </div>
+
+    </section>
+
+</main>
+
+
+<footer>
+    Weather Warning Center
+</footer>
+
+
+<script>
+
+    /*
+    ============================================================
+    SUPABASE
+    ============================================================
+    */
+
+    const SUPABASE_URL =
+        "https://whmtnbyqathjvbxqoajd.supabase.co";
+
+    const SUPABASE_PUBLISHABLE_KEY =
+        "sb_publishable_cMFioKF3OCWUysE03hYNkg_1lNY_rG9";
+
+    const VAPID_PUBLIC_KEY =
+        "BLC3yUrOm1EsuIDpDUSNv3eQF_7tQjbwUhufN6Ds5QpTl6FUEJ5jV6_ggEvx8YltnKALVr5zlERPFKBfX5LzJRc";
+
+
+    const supabaseClient =
+        window.supabase.createClient(
+            SUPABASE_URL,
+            SUPABASE_PUBLISHABLE_KEY
+        );
+
+
+    /*
+    ============================================================
+    ELEMENTS
+    ============================================================
+    */
+
+    const warningsElement =
+        document.getElementById("warnings");
+
+    const enablePushButton =
+        document.getElementById("enablePush");
+
+    const pushStatus =
+        document.getElementById("pushStatus");
+
+
+    /*
+    ============================================================
+    HELPERS
+    ============================================================
+    */
+
+    function escapeHtml(value) {
+
+        return String(value ?? "")
+            .replace(/[&<>"']/g, function (character) {
+
+                const characters = {
+                    "&": "&amp;",
+                    "<": "&lt;",
+                    ">": "&gt;",
+                    '"': "&quot;",
+                    "'": "&#039;"
+                };
+
+                return characters[character];
+            });
+    }
+
+
+    function formatDate(value) {
+
+        if (!value) {
+            return "—";
+        }
+
+        const date = new Date(value);
+
+        if (Number.isNaN(date.getTime())) {
+            return value;
+        }
+
+        return date.toLocaleString(
+            "lv-LV",
+            {
+                dateStyle: "short",
+                timeStyle: "short"
+            }
+        );
+    }
+
+
+    function getLevelName(level) {
+
+        if (level === "yellow") {
+            return "DZELTENS";
+        }
+
+        if (level === "orange") {
+            return "ORANŽS";
+        }
+
+        if (level === "red") {
+            return "SARKANS";
+        }
+
+        return String(level || "").toUpperCase();
+    }
+
+
+    /*
+    ============================================================
+    LOAD WARNINGS
+    ============================================================
+    */
+
+    async function loadWarnings() {
+
+        warningsElement.innerHTML = `
+            <p class="empty">
+                Ielādē brīdinājumus...
+            </p>
+        `;
+
+
+        const {
+            data,
+            error
+        } = await supabaseClient
+            .from("warnings")
+            .select(
+                "id, level, type, area, start, end, message, created_at"
+            )
+            .order(
+                "start",
+                {
+                    ascending: true
+                }
+            );
+
+
+        if (error) {
+
+            console.error(
+                "Neizdevās ielādēt brīdinājumus:",
+                error
+            );
+
+            warningsElement.innerHTML = `
+                <p class="empty">
+                    Neizdevās ielādēt brīdinājumus.
+                </p>
+            `;
+
+            return;
+        }
+
+
+        /*
+        Only show warnings that are currently active
+        */
+
+        const now = new Date();
+
+
+        const activeWarnings =
+            (data || []).filter(function (warning) {
+
+                const start =
+                    warning.start
+                        ? new Date(warning.start)
+                        : null;
+
+                const end =
+                    warning.end
+                        ? new Date(warning.end)
+                        : null;
+
+
+                if (
+                    start &&
+                    now < start
+                ) {
+                    return false;
+                }
+
+
+                if (
+                    end &&
+                    now > end
+                ) {
+                    return false;
+                }
+
+
+                return true;
+
+            });
+
+
+        drawWarnings(activeWarnings);
+    }
+
+
+    /*
+    ============================================================
+    DRAW WARNINGS
+    ============================================================
+    */
+
+    function drawWarnings(warnings) {
+
+        if (!warnings.length) {
+
+            warningsElement.innerHTML = `
+                <p class="empty">
+                    Pašlaik nav aktīvu laikapstākļu brīdinājumu.
+                </p>
+            `;
+
+            return;
+        }
+
+
+        warningsElement.innerHTML =
+            warnings
+                .map(function (warning) {
+
+                    const level =
+                        escapeHtml(warning.level);
+
+                    const type =
+                        escapeHtml(warning.type);
+
+                    const area =
+                        escapeHtml(warning.area);
+
+                    const message =
+                        escapeHtml(warning.message);
+
+                    const start =
+                        formatDate(warning.start);
+
+                    const end =
+                        formatDate(warning.end);
+
+                    const levelName =
+                        getLevelName(warning.level);
+
+
+                    return `
+                        <div
+                            class="warning ${level}"
+                            style="margin-bottom: 14px"
+                        >
+
+                            <div class="warning-head">
+
+                                <div class="warning-title">
+
+                                    <span class="badge">
+                                        ${levelName}
+                                    </span>
+
+                                    <h2>
+                                        ${type}
+                                    </h2>
+
+                                </div>
+
+                            </div>
+
+
+                            <p>
+                                ${message}
+                            </p>
+
+
+                            <div class="meta">
+
+                                <span>
+                                    📍
+                                    <b>
+                                        ${area}
+                                    </b>
+                                </span>
+
+
+                                <span>
+                                    🕐
+                                    <b>
+                                        ${start}
+                                        →
+                                        ${end}
+                                    </b>
+                                </span>
+
+                            </div>
+
+                        </div>
+                    `;
+
+                })
+                .join("");
+    }
+
+
+    /*
+    ============================================================
+    SERVICE WORKER
+    ============================================================
+    */
+
+    let serviceWorkerRegistration = null;
+
+
+    async function registerServiceWorker() {
+
+        if (!("serviceWorker" in navigator)) {
+
+            console.warn(
+                "Šis pārlūks neatbalsta Service Worker."
+            );
+
+            return null;
+        }
+
+
+        try {
+
+            /*
+            IMPORTANT:
+            If your service worker has another filename,
+            change "service-worker.js" here.
+            */
+
+            serviceWorkerRegistration =
+                await navigator.serviceWorker.register(
+                    "service-worker.js"
+                );
+
+
+            await navigator.serviceWorker.ready;
+
+
+            console.log(
+                "Service Worker ir aktīvs."
+            );
+
+
+            return serviceWorkerRegistration;
+
+        } catch (error) {
+
+            console.error(
+                "Service Worker reģistrācija neizdevās:",
+                error
+            );
+
+            pushStatus.textContent =
+                "Service Worker neizdevās palaist.";
+
+            pushStatus.className =
+                "push-error";
+
+            return null;
+        }
+    }
+
+
+    /*
+    ============================================================
+    CONVERT VAPID KEY
+    ============================================================
+    */
+
+    function urlBase64ToUint8Array(base64String) {
+
+        const padding =
+            "=".repeat(
+                (4 - base64String.length % 4) % 4
+            );
+
+
+        const base64 =
+            (
+                base64String
+                + padding
+            )
+                .replace(/-/g, "+")
+                .replace(/_/g, "/");
+
+
+        const rawData =
+            window.atob(base64);
+
+
+        return Uint8Array.from(
+            [...rawData].map(
+                character => character.charCodeAt(0)
+            )
+        );
+    }
+
+
+    /*
+    ============================================================
+    ENABLE PUSH
+    ============================================================
+    */
+
+    async function enablePushNotifications() {
+
+        pushStatus.textContent = "";
+        pushStatus.className = "";
+
+
+        /*
+        Browser support
+        */
+
+        if (
+            !("Notification" in window)
+        ) {
+
+            pushStatus.textContent =
+                "Šis pārlūks neatbalsta paziņojumus.";
+
+            pushStatus.className =
+                "push-error";
+
+            return;
+        }
+
+
+        /*
+        HTTPS check
+        */
+
+        if (
+            location.protocol !== "https:"
+            &&
+            location.hostname !== "localhost"
+        ) {
+
+            pushStatus.textContent =
+                "Push paziņojumiem nepieciešams HTTPS.";
+
+            pushStatus.className =
+                "push-error";
+
+            return;
+        }
+
+
+        enablePushButton.disabled = true;
+
+
+        try {
+
+            /*
+            Request notification permission
+            */
+
+            const permission =
+                await Notification.requestPermission();
+
+
+            if (permission !== "granted") {
+
+                pushStatus.textContent =
+                    "Paziņojumu atļauja netika piešķirta.";
+
+                pushStatus.className =
+                    "push-error";
+
+                enablePushButton.disabled = false;
+
+                return;
+            }
+
+
+            /*
+            Make sure Service Worker is ready
+            */
+
+            const registration =
+                await registerServiceWorker();
+
+
+            if (!registration) {
+
+                throw new Error(
+                    "Service Worker nav pieejams."
+                );
+            }
+
+
+            /*
+            Get existing subscription
+            */
+
+            let subscription =
+                await registration.pushManager.getSubscription();
+
+
+            /*
+            Create subscription if needed
+            */
+
+            if (!subscription) {
+
+                subscription =
+                    await registration.pushManager.subscribe({
+
+                        userVisibleOnly: true,
+
+                        applicationServerKey:
+                            urlBase64ToUint8Array(
+                                VAPID_PUBLIC_KEY
+                            )
+
+                    });
+            }
+
+
+            /*
+            Save subscription locally
+            */
+
+            localStorage.setItem(
+                "weatherPushSubscription",
+                JSON.stringify(
+                    subscription.toJSON()
+                )
+            );
+
+
+            /*
+            Try to save subscription to Supabase.
+            
+            This requires a table named:
+            push_subscriptions
+            */
+
+            const subscriptionJson =
+                subscription.toJSON();
+
+
+            const {
+                error
+            } = await supabaseClient
+                .from("push_subscriptions")
+                .upsert(
+                    {
+                        endpoint:
+                            subscriptionJson.endpoint,
+
+                        p256dh:
+                            subscriptionJson.keys?.p256dh,
+
+                        auth:
+                            subscriptionJson.keys?.auth
+                    },
+                    {
+                        onConflict: "endpoint"
+                    }
+                );
+
+
+            if (error) {
+
+                console.warn(
+                    "Push subscription netika saglabāta Supabase:",
+                    error
+                );
+
+                /*
+                The local subscription still works
+                for the browser/service-worker side.
+                */
+
+            }
+
+
+            pushStatus.textContent =
+                "Paziņojumi ieslēgti šajā ierīcē.";
+
+            pushStatus.className =
+                "push-success";
+
+
+            enablePushButton.textContent =
+                "🔔 Paziņojumi ieslēgti";
+
+
+        } catch (error) {
+
+            console.error(
+                "Push paziņojumu kļūda:",
+                error
+            );
+
+
+            pushStatus.textContent =
+                "Paziņojumu ieslēgšana neizdevās: "
+                + error.message;
+
+            pushStatus.className =
+                "push-error";
+
+
+            enablePushButton.disabled = false;
+        }
+    }
+
+
+    /*
+    ============================================================
+    CHECK PUSH STATUS
+    ============================================================
+    */
+
+    async function checkPushStatus() {
+
+        if (
+            !("Notification" in window)
+            ||
+            !("serviceWorker" in navigator)
+        ) {
+            return;
+        }
+
+
+        try {
+
+            const registration =
+                await registerServiceWorker();
+
+
+            if (!registration) {
+                return;
+            }
+
+
+            const subscription =
+                await registration
+                    .pushManager
+                    .getSubscription();
+
+
+            if (
+                subscription
+                &&
+                Notification.permission === "granted"
+            ) {
+
+                enablePushButton.textContent =
+                    "🔔 Paziņojumi ieslēgti";
+
+                pushStatus.textContent =
+                    "Paziņojumi ieslēgti šajā ierīcē.";
+
+                pushStatus.className =
+                    "push-success";
+
+            }
+
+        } catch (error) {
+
+            console.warn(
+                "Neizdevās pārbaudīt push statusu:",
+                error
+            );
+        }
+    }
+
+
+    /*
+    ============================================================
+    REALTIME WARNINGS
+    ============================================================
+    
+    When admin.html adds a new warning to Supabase,
+    this function receives it immediately.
+    */
+
+    function setupRealtimeWarnings() {
+
+        const channel =
+            supabaseClient
+                .channel("weather-warning-updates")
+                .on(
+                    "postgres_changes",
+                    {
+                        event: "INSERT",
+                        schema: "public",
+                        table: "warnings"
+                    },
+                    async function (payload) {
+
+                        console.log(
+                            "Jauns brīdinājums:",
+                            payload.new
+                        );
+
+
+                        /*
+                        Reload warnings
+                        */
+
+                        await loadWarnings();
+
+
+                        /*
+                        Show notification
+                        */
+
+                        showNewWarningNotification(
+                            payload.new
+                        );
+
+                    }
+                )
+                .subscribe(function (status) {
+
+                    console.log(
+                        "Realtime status:",
+                        status
+                    );
+
+                });
+
+
+        return channel;
+    }
+
+
+    /*
+    ============================================================
+    SHOW NEW WARNING NOTIFICATION
+    ============================================================
+    */
+
+    async function showNewWarningNotification(
+        warning
+    ) {
+
+        const title =
+            "⚠️ " +
+            (
+                warning.type
+                ||
+                "Laikapstākļu brīdinājums"
+            );
+
+
+        const message =
+            warning.message
+            ||
+            "Ir publicēts jauns laikapstākļu brīdinājums.";
+
+
+        /*
+        If notifications are allowed,
+        ask the Service Worker to show it.
+        */
+
+        if (
+            "serviceWorker" in navigator
+            &&
+            Notification.permission === "granted"
+        ) {
+
+            try {
+
+                const registration =
+                    await navigator.serviceWorker.ready;
+
+
+                await registration.showNotification(
+                    title,
+                    {
+                        body: message,
+
+                        icon:
+                            "icons/icon-192.png",
+
+                        badge:
+                            "icons/icon-192.png",
+
+                        tag:
+                            "weather-warning-" +
+                            warning.id,
+
+                        renotify: true,
+
+                        data: {
+                            warningId:
+                                warning.id,
+
+                            url:
+                                window.location.origin
+                                +
+                                "/index.html"
+                        }
+                    }
+                );
+
+
+                return;
+
+            } catch (error) {
+
+                console.warn(
+                    "Service Worker notification neizdevās:",
+                    error
+                );
+            }
+        }
+
+
+        /*
+        Fallback notification
+        */
+
+        if (
+            Notification.permission === "granted"
+        ) {
+
+            try {
+
+                new Notification(
+                    title,
+                    {
+                        body: message
+                    }
+                );
+
+            } catch (error) {
+
+                console.warn(
+                    "Fallback notification neizdevās:",
+                    error
+                );
+            }
+        }
+    }
+
+
+    /*
+    ============================================================
+    BUTTON
+    ============================================================
+    */
+
+    enablePushButton.addEventListener(
+        "click",
+        enablePushNotifications
+    );
+
+
+    /*
+    ============================================================
+    START APPLICATION
+    ============================================================
+    */
+
+    async function startApp() {
+
+        /*
+        Register Service Worker
+        */
+
+        await registerServiceWorker();
+
+
+        /*
+        Load warnings from Supabase
+        */
+
+        await loadWarnings();
+
+
+        /*
+        Listen for new warnings
+        */
+
+        setupRealtimeWarnings();
+
+
+        /*
+        Check notification status
+        */
+
+        await checkPushStatus();
+
+    }
+
+
+    startApp();
+
+</script>
+
+</body>
+</html>
